@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import collections.abc
 import logging
+import os
 import textwrap
 import warnings
 from collections import OrderedDict
@@ -1145,6 +1146,12 @@ class State(Serializable):
 
         dataset = self._dataset_of(self.train_dataloader)
         if hasattr(dataset, 'load_state_dict'):
+            print(f"===== dataset state {obj['train']}")
+            if 'COMPOSER_REWIND_SAMPLE_IN_EPOCH' in os.environ:
+                obj['train']['sample_in_epoch'] = int(
+                    os.environ['COMPOSER_REWIND_SAMPLE_IN_EPOCH']
+                )
+                print(f"===== rewinding dataset state {obj['train']}")
             dataset.load_state_dict(obj['train'])  # pyright: ignore
             obj['train'] = None
             self.dataset_resumption['train'] = True

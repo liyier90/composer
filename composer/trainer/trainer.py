@@ -1400,6 +1400,31 @@ class Trainer:
             raise ValueError(f'`torch.compile` is supported for PyTorch 2.0 or higher.' +
                              f'Either update your PyTorch version or disable parameter by providing ' +
                              f'`compile_config` to `None`.')
+        self.rewind_timestamp = self.state.timestamp.copy()
+        self.resume_timestamp = self.state.timestamp.copy()
+        self.skip_data = False
+        if (
+            'COMPOSER_REWIND_TO_BATCH' in os.environ
+            and 'COMPOSER_SKIP_TO_BATCH' in os.environ
+        ):
+            rewind_to_batch = Time.from_timestring(
+                os.environ['COMPOSER_REWIND_TO_BATCH']
+            )
+            skip_to_batch = Time.from_timestring(
+                os.environ['COMPOSER_SKIP_TO_BATCH']
+            )
+            if self.state.timestamp < skip_to_batch:
+                print(f"===== rewind to batch {rewind_to_batch}")
+                self.state.timestamp = self.state.timestamp.copy(
+                    batch=skip_to_batch,
+                    batch_in_epoch=skip_to_batch,
+                )
+                self.rewind_timestamp = self.rewind_timestamp.copy(
+                    batch=rewind_to_batch,
+                    batch_in_epoch=rewind_to_batch,
+                )
+                self.skip_data = True
+
 
     @property
     def saved_checkpoints(self) -> List[str]:
@@ -1907,6 +1932,29 @@ class Trainer:
 
         return int(sample_token_tensor[0].cpu().item()), int(sample_token_tensor[1].cpu().item()), batch_time
 
+    def _advance_sample_and_token(self) -> None:
+        """Advance State object's timestamp as we spin the dataloader so
+        `sample_in_epoch` is at the correct offset for saving dataset state
+        dict.
+        """
+        self.state.batch = self.state.device.batch_to_device(self.state.batch)
+        rank_num_samples = self._train_data_spec.get_num_samples_in_batch(self.state.batch)
+        rank_num_tokens = self._train_data_spec.get_num_tokens_in_batch(self.state.batch)
+        dummy_batch_time = datetime.timedelta(seconds=0)
+        (
+            total_num_samples,
+            total_num_tokens,
+            dummy_batch_time,
+        ) = self._accumulate_time_across_ranks(
+            rank_num_samples, rank_num_tokens, dummy_batch_time
+        )
+        self.state.timestamp = self.state.timestamp.copy(
+            sample=self.state.timestamp.sample + total_num_samples,
+            sample_in_epoch=self.state.timestamp.sample_in_epoch + total_num_samples,
+            token= self.state.timestamp.token + total_num_tokens,
+            token_in_epoch= self.state.timestamp.token_in_epoch + total_num_tokens,
+        )
+
     def _train_loop(self) -> None:
         """Run training for the specified number of epochs and log results."""
         # print training start
@@ -1951,6 +1999,14 @@ class Trainer:
                         if batch_idx + 1 == int(self.state.timestamp.batch_in_epoch) and self._rng_state is not None:
                             reproducibility.load_rng_state(self._rng_state)
                             self._rng_state = None
+                        continue
+
+                    spin_idx = batch_idx + int(self.rewind_timestamp.batch_in_epoch)
+                    if self.skip_data and spin_idx < int(
+                        self.state.timestamp.batch_in_epoch
+                    ):
+                        if spin_idx >= int(self.resume_timestamp.batch_in_epoch):
+                            self._advance_sample_and_token()
                         continue
 
                     self.state.batch = self.state.device.batch_to_device(self.state.batch)
