@@ -328,11 +328,11 @@ def prepare_fsdp_module(
                 f'and param_dtype `{param_dtype}.` Consider using one of the predefined mixed_precision strategies '
                 "(choose: `'FULL'`, `'DEFAULT'`, `'PURE'`)")
 
-        if param_dtype == torch.float32:
-            raise ValueError(
-                f'FSDP in PyTorch 1.13 does not support param_dtype `{param_dtype}` with sharding_strategy `{sharding_map_key}` '
-                f'Consider using `amp` or `bf16` for precision or setting param_dtype in mixed_precision to `None` '
-                f'with sharding strategy `{sharding_map_key}.`')
+        #  if param_dtype == torch.float32:
+        #      raise ValueError(
+        #          f'FSDP in PyTorch 1.13 does not support param_dtype `{param_dtype}` with sharding_strategy `{sharding_map_key}` '
+        #          f'Consider using `amp` or `bf16` for precision or setting param_dtype in mixed_precision to `None` '
+        #          f'with sharding strategy `{sharding_map_key}.`')
 
     if fsdp_config.get('min_params') is not None:
         warnings.warn(DeprecationWarning('`min_params` in FSDP config will be deprecated in composer version 0.16.0.'))
